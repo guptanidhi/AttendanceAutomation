@@ -1,0 +1,15 @@
+{
+  "name": "attendanceproject",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "author": "Nidhi Gupta",
+  "license": "ISC",
+  "dependencies": {
+    "csv-write-stream": "^2.0.0",
+    "linereader": "^1.1.0"
+  }
+}
