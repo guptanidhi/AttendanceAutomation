@@ -1,17 +1,16 @@
 let fs = require('fs');
 let lineReader = require('linereader');
-
 let csvWriter = require('csv-write-stream');
+let date = require('date-and-time');
 
-let attendanceSheetPath = './cts-w1/attendance/';
-
-let attendanceSheetsArray = ['29-Nov', '1-Dec', '4-Dec'];
+// Attendance sheet folder path
+let attendanceSheetPath = './attendance/';
 
 function getMasterList(sheet, callback){
 	let masterEmailIds = [];
 	sheet.on('error', function(error) {
 		callback(error);
-		masterSheet.close();
+		sheet.close();
 	});
 
 	sheet.on('line', function(lineNo, line) {
@@ -29,6 +28,7 @@ function getMasterList(sheet, callback){
 function getAttendiesList(attendanceSheet, callback){
 	let attendedList = [];
 	let registeredButNotAttended = [];
+	let attendanceDate;
 
 	attendanceSheet.on('error', function (err) {
 	  console.log(err);
@@ -36,6 +36,10 @@ function getAttendiesList(attendanceSheet, callback){
 	});
 
 	attendanceSheet.on('line', function (lineno, line) {
+		if(lineno == 5){
+			let dateRowArray = line.split(',');
+			attendanceDate = date.format(new Date(dateRowArray[1]), 'DD/MMM/YY');
+		}
 	  if (lineno >= 9) {
 	  	let lineArr = line.split(',');
 	  	if(lineArr[0] == "Yes"){
@@ -47,12 +51,12 @@ function getAttendiesList(attendanceSheet, callback){
 	});
 
 	attendanceSheet.on('end', function () {
-		callback(attendedList, registeredButNotAttended);
+		callback(attendanceDate, attendedList, registeredButNotAttended);
 	  console.log("Attendance sheet Complete.");
 	});
 }
 
-getMasterList(new lineReader('./cts-w1/master.csv'), function(masterList){
+getMasterList(new lineReader('master.csv'), function(masterList){
 	// Temporary Master list get appended which will get appended by all attended sheet
 	let mastList = masterList;
 	// Output sheet header
@@ -60,20 +64,27 @@ getMasterList(new lineReader('./cts-w1/master.csv'), function(masterList){
 	// Complete object with sheets key name
 	let completeArr = {};
 	// Iterage over all attenda
-	attendanceSheetsArray.forEach((sheet, index) => {
-		// Output sheet header push with sheets name i.e attendance date
-		header.push(sheet);
+	// attendanceSheetsArray.forEach((sheet, index) => {
+	fs.readdirSync(attendanceSheetPath).forEach((file, index, fileLength) => {
 		// line by line read of attendance sheet
-		getAttendiesList(new lineReader(attendanceSheetPath+sheet+'.csv'), function(attendedList, registeredButNotAttended) {
+		getAttendiesList(new lineReader(attendanceSheetPath+file), function(attendanceDate, attendedList, registeredButNotAttended) {
+			// Output sheet header push with attendance date
+			header.push(attendanceDate);
 			// Combined all attendies who attended and registered but not attended
 			let attendanceObj = [...attendedList, ...registeredButNotAttended];
 			// Suspicious Users which are in attendance list but not in master list
 			let suspiciousUsers = attendanceObj.filter(function(obj) { return masterList.indexOf(obj) == -1; });
 			// Cpmbined list of master and attendies
 			let combinedList = [...mastList, ...attendanceObj];
+
 			// Make combinedList with unique removed repeated users
 			let uniqueList = combinedList.filter(function(email, index, array){
 				return array.indexOf(email) == index;		
+			});
+
+			// Mentors EmailIds
+			let mentorsList = uniqueList.filter(function(email, index, array){
+				return email.includes('@stackroute.in');		
 			});
 
 			// Temporary Master list updated for output file
@@ -86,8 +97,10 @@ getMasterList(new lineReader('./cts-w1/master.csv'), function(masterList){
 				let obj = {
 					email: item
 				};
-
-				if(suspiciousUsers.indexOf(item) != -1){
+				if(mentorsList.indexOf(item) != -1){
+					// Mentors marked as "Mentor"
+					obj.status = 'Mentor';
+				}else if(suspiciousUsers.indexOf(item) != -1){
 					// Suspicious User attendance marked as "Suspicious"
 					obj.status = 'Suspicious';
 				}else if(attendedList.indexOf(item) != -1){
@@ -103,18 +116,17 @@ getMasterList(new lineReader('./cts-w1/master.csv'), function(masterList){
 				// Pushing object to array
 				arr.push(obj);
 			})
-			// Complete object key is name of sheet i.e. Attendance date assigned array
-			completeArr[sheet] = (arr);
+			// Complete object key is Attendance date assigned array
+			completeArr[attendanceDate] = (arr);
 
 			// If iterated last sheet then write into file
-			if((attendanceSheetsArray.length-1) == index){
+			if((fileLength.length-1) == index){
 				// Write file with heading, users unique list and complete attendies with attendacne status
 				writeFile(header, uniqueList, completeArr);
 			}
 		})
 	})
 })
-
 
 // Is User Available in sheet array
 function isUserAvailable(array, emailId){
@@ -124,22 +136,34 @@ function isUserAvailable(array, emailId){
 }
 
 function writeFile(header, uniqueList, completeArr){
-
-	let writer = csvWriter({ headers: header});
-	writer.pipe(fs.createWriteStream('output.csv'));	
 	
-	uniqueList.forEach((emailId) => {
-		let firstColumn = isUserAvailable(completeArr[header[1]], emailId);
-		let	firstColumnStatus = (firstColumn.length > 0) ? firstColumn[0].status: "";
+	fs.exists('./output.csv', function(exists) {
+		// To delete output file if it exist
+	  if(exists) {
+	    fs.unlink('./output.csv');
+	  }
 
-		let secondColumn = isUserAvailable(completeArr[header[2]], emailId);
-		let secondColumnStatus = (secondColumn.length > 0) ? secondColumn[0].status:"";
+		// Create output file with headers
+		let writer = csvWriter({ headers: header});
+		writer.pipe(fs.createWriteStream('output.csv'));
 
-		let thirdColumn = isUserAvailable(completeArr[header[3]], emailId);
-		let	thirdColumnStatus = (thirdColumn.length > 0) ? thirdColumn[0].status: "";
+		// Get attendate date array
+		let allAttendanceSheetArr = Object.keys(completeArr);
+		
+		// Iterate over all emailIds in uniqueList
+		uniqueList.forEach((emailId) => {
+			let attendanceStatus = [];
 
-		// Write into the file EmailId, Date wise attendance Status
-		writer.write([emailId, firstColumnStatus, secondColumnStatus, thirdColumnStatus]);
-	})		
-	writer.end();
+			// Iterate over all attendanceDate
+			allAttendanceSheetArr.forEach((attendanceSheet) => {
+				let column = isUserAvailable(completeArr[attendanceSheet], emailId);
+				let	columnStatus = (column.length > 0) ? column[0].status: "";
+				attendanceStatus.push(columnStatus);
+			})
+
+			// Write into the file EmailId, Date wise attendance Status
+			writer.write([emailId, ...attendanceStatus]);
+		})		
+		writer.end();
+	});
 }

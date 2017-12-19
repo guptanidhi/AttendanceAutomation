@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "csv-write-stream": "^2.0.0",
+    "date-and-time": "^0.6.1",
     "linereader": "^1.1.0"
   }
 }
